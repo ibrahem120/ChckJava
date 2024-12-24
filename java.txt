@@ -1,0 +1,212 @@
+import java.util.*;
+
+/**
+ * Custom Java Model Checker Tool
+ * This tool emulates basic functionality of Java Pathfinder (JPF).
+ * It checks for concurrency issues like race conditions and deadlocks.
+ */
+
+// System Management Layer
+class SystemState {
+    private final List<String> executionLog = new ArrayList<>();
+    private final Set<String> resourceLocks = new HashSet<>();
+    private final Map<String, String> lockOwners = new HashMap<>();
+
+    /**
+     * Record an execution step.
+     * @param message Step description to log.
+     */
+    public void recordExecutionStep(String message) {
+        executionLog.add(message);
+    }
+
+    /**
+     * Acquire a resource lock.
+     * @param resource The resource to lock.
+     * @param thread The thread attempting the lock.
+     * @return True if the lock is acquired, false if it’s already locked.
+     */
+    public boolean acquireLock(String resource, String thread) {
+        if (resourceLocks.contains(resource)) {
+            return false; // Resource already locked
+        }
+        resourceLocks.add(resource);
+        lockOwners.put(resource, thread);
+        return true;
+    }
+
+    /**
+     * Release a resource lock.
+     * @param resource The resource to unlock.
+     */
+    public void releaseLock(String resource) {
+        resourceLocks.remove(resource);
+        lockOwners.remove(resource);
+    }
+
+    /**
+     * Check for deadlock by identifying circular dependencies in the lock graph.
+     */
+    public void checkForDeadlock() {
+        Map<String, String> reverseDependencies = new HashMap<>();
+        for (Map.Entry<String, String> entry : lockOwners.entrySet()) {
+            reverseDependencies.put(entry.getValue(), entry.getKey());
+        }
+
+        Set<String> visited = new HashSet<>();
+        for (String thread : lockOwners.values()) {
+            if (detectCycle(thread, visited, new HashSet<>())) {
+                recordExecutionStep("Deadlock detected involving thread: " + thread);
+                return;
+            }
+        }
+    }
+
+    private boolean detectCycle(String current, Set<String> visited, Set<String> stack) {
+        if (stack.contains(current)) {
+            return true; // Cycle detected
+        }
+        if (visited.contains(current)) {
+            return false; // Already processed
+        }
+        visited.add(current);
+        stack.add(current);
+
+        String resource = lockOwners.get(current);
+        if (resource != null && detectCycle(resource, visited, stack)) {
+            return true;
+        }
+
+        stack.remove(current);
+        return false;
+    }
+
+    /**
+     * Display the execution log.
+     */
+    public void displayLog() {
+        System.out.println("\nExecution Log:");
+        executionLog.forEach(System.out::println);
+    }
+}
+
+// Thread Representation
+class CustomThread implements Runnable {
+    private final String name;
+    private final SystemState systemState;
+    private final List<String> actions;
+
+    public CustomThread(String name, SystemState systemState, List<String> actions) {
+        this.name = name;
+        this.systemState = systemState;
+        this.actions = actions;
+    }
+
+    @Override
+    public void run() {
+        for (String action : actions) {
+            if (action.startsWith("LOCK")) {
+                String resource = action.split(" ")[1];
+                if (systemState.acquireLock(resource, name)) {
+                    systemState.recordExecutionStep(name + " acquired lock on " + resource);
+                } else {
+                    systemState.recordExecutionStep(name + " failed to acquire lock on " + resource);
+                }
+            } else if (action.startsWith("UNLOCK")) {
+                String resource = action.split(" ")[1];
+                systemState.releaseLock(resource);
+                systemState.recordExecutionStep(name + " released lock on " + resource);
+            } else {
+                systemState.recordExecutionStep(name + " executed action: " + action);
+            }
+
+            // Check for deadlocks after each action
+            systemState.checkForDeadlock();
+        }
+    }
+
+    public String getName() {
+        return name;
+    }
+}
+
+// Execution Engine
+public class ModelChecker {
+
+    private final SystemState systemState = new SystemState();
+    private final List<CustomThread> threads = new ArrayList<>();
+
+    /**
+     * Register a custom thread for analysis.
+     * @param thread The thread to register.
+     */
+    public void registerThread(CustomThread thread) {
+        threads.add(thread);
+        systemState.recordExecutionStep("Thread registered: " + thread.getName());
+    }
+
+    /**
+     * Simulates execution of all registered threads with basic interleaving.
+     */
+    public void simulateExecutionWithInterleaving() {
+        systemState.recordExecutionStep("Starting thread execution simulation with interleaving...");
+        
+        List<List<CustomThread>> permutations = generatePermutations(threads);
+
+        for (List<CustomThread> permutation : permutations) {
+            systemState.recordExecutionStep("\nExecuting permutation: " + permutation);
+            for (CustomThread thread : permutation) {
+                systemState.recordExecutionStep("Executing thread: " + thread.getName());
+                thread.run();
+            }
+        }
+
+        systemState.recordExecutionStep("Execution simulation with interleaving complete.");
+    }
+
+    /**
+     * Generate all possible permutations of threads for interleaving.
+     */
+    private List<List<CustomThread>> generatePermutations(List<CustomThread> threads) {
+        List<List<CustomThread>> result = new ArrayList<>();
+        permute(threads, 0, result);
+        return result;
+    }
+
+    private void permute(List<CustomThread> threads, int start, List<List<CustomThread>> result) {
+        if (start >= threads.size()) {
+            result.add(new ArrayList<>(threads));
+        } else {
+            for (int i = start; i < threads.size(); i++) {
+                Collections.swap(threads, i, start);
+                permute(threads, start + 1, result);
+                Collections.swap(threads, i, start);
+            }
+        }
+    }
+
+    /**
+     * Displays the execution log.
+     */
+    public void displayLog() {
+        systemState.displayLog();
+    }
+
+    public static void main(String[] args) {
+        ModelChecker checker = new ModelChecker();
+
+        // Define actions for threads
+        List<String> actions1 = Arrays.asList("LOCK Resource1", "ACTION 1", "UNLOCK Resource1");
+        List<String> actions2 = Arrays.asList("LOCK Resource1", "ACTION 2", "UNLOCK Resource1");
+
+        // Register threads
+        checker.registerThread(new CustomThread("Thread1", checker.systemState, actions1));
+        checker.registerThread(new CustomThread("Thread2", checker.systemState, actions2));
+
+        // Simulate execution with interleaving
+        checker.simulateExecutionWithInterleaving();
+
+        // Display log
+        checker.displayLog();
+    }
+}
